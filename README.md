@@ -694,8 +694,6 @@ Set it from bot admin panel:
 ```text
 Admin Panel → Sanaei Panel Settings → Change Subscription URL
 ```
-
-````
 برای دیدن اطلاعات دیتابیس روی VPS، اول برو داخل پروژه:
 
 ```bash
