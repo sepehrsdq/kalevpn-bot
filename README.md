@@ -696,5 +696,117 @@ Admin Panel → Sanaei Panel Settings → Change Subscription URL
 ```
 
 ````
+برای دیدن اطلاعات دیتابیس روی VPS، اول برو داخل پروژه:
+
+```bash
+cd /root/kale_vpn_bot
+```
+
+## 1. باز کردن دیتابیس
+
+```bash
+sqlite3 /root/kale_vpn_bot/data/bot_database.db
+```
+
+بعد وارد محیط SQLite می‌شی. این دستورها را می‌تونی بزنی:
+
+```sql
+.tables
+```
+
+نمایش ساختار جدول‌ها:
+
+```sql
+.schema users
+.schema invoices
+.schema deposits
+```
+
+خروج:
+
+```sql
+.exit
+```
+
 ---
+
+## 2. دیدن جدول کاربران
+
+```bash
+sqlite3 /root/kale_vpn_bot/data/bot_database.db "SELECT user_id, username, balance, referrer_id, is_banned FROM users;"
+```
+
+---
+
+## 3. دیدن خریدها / سرویس‌ها
+
+```bash
+sqlite3 /root/kale_vpn_bot/data/bot_database.db "SELECT invoice_id, user_id, service_type, plan, amount, status, delivered, client_email, sub_id, created_at FROM invoices ORDER BY created_at DESC;"
+```
+
+---
+
+## 4. دیدن شارژها
+
+```bash
+sqlite3 /root/kale_vpn_bot/data/bot_database.db "SELECT deposit_id, user_id, amount, network, status, tx_hash, created_at FROM deposits ORDER BY created_at DESC;"
+```
+
+---
+
+## 5. دیدن تنظیمات بات
+
+```bash
+sqlite3 /root/kale_vpn_bot/data/bot_database.db "SELECT key, value FROM settings;"
+```
+
+برای اینکه پسورد پنل را در خروجی نبینی، این بهتره:
+
+```bash
+sqlite3 /root/kale_vpn_bot/data/bot_database.db "SELECT key, CASE WHEN key='panel_password' THEN '***HIDDEN***' ELSE value END AS value FROM settings;"
+```
+
+---
+
+## 6. دیدن لاگ مصرف سرویس مصرفی
+
+```bash
+sqlite3 /root/kale_vpn_bot/data/bot_database.db "SELECT invoice_id, user_id, client_email, delta_bytes, charged_amount, balance_before, balance_after, created_at FROM usage_logs ORDER BY created_at DESC;"
+```
+
+---
+
+## 7. خروجی مرتب‌تر با ستون‌بندی
+
+برای حالت خواناتر:
+
+```bash
+sqlite3 -header -column /root/kale_vpn_bot/data/bot_database.db "SELECT user_id, username, balance, is_banned FROM users;"
+```
+
+مثلاً خریدها:
+
+```bash
+sqlite3 -header -column /root/kale_vpn_bot/data/bot_database.db "SELECT invoice_id, user_id, service_type, amount, status, created_at FROM invoices ORDER BY created_at DESC;"
+```
+
+---
+
+## 8. بکاپ سریع قبل از دستکاری
+
+قبل از هر تغییر دستی در دیتابیس، این را بزن:
+
+```bash
+cd /root/kale_vpn_bot
+sqlite3 data/bot_database.db ".backup 'backups/bot_database_manual_$(date +%Y-%m-%d_%H-%M-%S).db'"
+```
+
+بعد اگر خواستی یک کاربر خاص را ببینی:
+
+```bash
+sqlite3 -header -column /root/kale_vpn_bot/data/bot_database.db "SELECT * FROM users WHERE user_id=USER_ID;"
+```
+
+به جای `USER_ID` آیدی عددی کاربر را بگذار.
+
 
