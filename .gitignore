@@ -1,0 +1,13 @@
+# محیط مجازی
+venv/
+__pycache__/
+
+# دیتابیس
+data/bot_database.db
+
+# فایل توکن‌ها
+.env
+
+# لاگ‌ها و بکاپ‌ها
+logs/
+backups/
