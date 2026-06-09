@@ -47,3 +47,4 @@ def validate_config():
         raise RuntimeError(
             "Missing required environment variables: " + ", ".join(missing)
         )
+

@@ -22,6 +22,7 @@ from app.keyboards import (
 from app.services.referrals import reward_referral_if_needed
 from app.services.sync import sync_services_with_panel
 from app.services.xui import XUIManager
+
 from app.utils import (
     calculate_fixed_price,
     format_usage,
@@ -684,28 +685,107 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if data == "shop_usage":
+    elif data == "shop_usage":
+
         usage_price = get_float_setting("usage_price_per_gb", 0.20)
         min_balance = get_float_setting("usage_min_balance", 1.00)
 
         keyboard = [
-            [InlineKeyboardButton("✅ تایید قوانین و فعال‌سازی", callback_data="usage_activate")],
-            [InlineKeyboardButton("❌ لغو", callback_data="shop")],
+
+            [
+                InlineKeyboardButton(
+                    "✅ درخواست فعال‌سازی",
+                    callback_data="usage_rules"
+                )
+            ],
+
+            [
+                InlineKeyboardButton(
+                    "💰 شارژ کیف پول",
+                    callback_data="deposit"
+                )
+            ],
+
+            [
+                InlineKeyboardButton(
+                    "🔙 بازگشت",
+                    callback_data="shop"
+                )
+            ]
         ]
 
+        msg = (
+            "⚡ سرویس مصرفی KaleVPN\n\n"
+            "━━━━━━━━━━━━━━━\n\n"
+            "در این سرویس، شما کیف پول خود را شارژ می‌کنید و هزینه فقط بر اساس مصرف واقعی کسر می‌شود.\n\n"
+            "بعد از تایید قوانین و فعال‌سازی، لینک Subscription و کانفیگ به صورت خودکار برای شما ارسال می‌شود.\n\n"
+            f"💵 تعرفه فعلی هر 1GB:\n"
+            f"`{usage_price}$`\n\n"
+            f"💳 حداقل موجودی برای فعال‌سازی:\n"
+            f"`{min_balance}$`\n\n"
+            "برای ادامه، روی درخواست فعال‌سازی بزنید."
+        )
+
         await query.edit_message_text(
+            msg,
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+        return
+
+
+    elif data == "usage_rules":
+
+        usage_price = get_float_setting("usage_price_per_gb", 0.20)
+        min_balance = get_float_setting("usage_min_balance", 1.00)
+
+        keyboard = [
+
+            [
+                InlineKeyboardButton(
+                    "✅ تایید قوانین و فعال‌سازی",
+                    callback_data="usage_activate"
+                )
+            ],
+
+            [
+                InlineKeyboardButton(
+                    "❌ لغو",
+                    callback_data="shop_usage"
+                )
+            ]
+        ]
+
+        msg = (
             "📜 قوانین سرویس مصرفی KaleVPN\n\n"
             "━━━━━━━━━━━━━━━\n\n"
+
             "1️⃣ سرویس مصرفی بر اساس مصرف واقعی اینترنت محاسبه می‌شود.\n\n"
-            f"2️⃣ تعرفه فعلی هر 1GB مصرف: `{usage_price}$`\n\n"
-            f"3️⃣ حداقل موجودی لازم برای فعال‌سازی: `{min_balance}$`\n\n"
+
+            f"2️⃣ تعرفه فعلی هر 1GB مصرف:\n"
+            f"`{usage_price}$`\n\n"
+
+            f"3️⃣ حداقل موجودی لازم برای فعال‌سازی:\n"
+            f"`{min_balance}$`\n\n"
+
             "4️⃣ هزینه مصرف به صورت دوره‌ای از کیف پول شما کسر می‌شود.\n\n"
+
             "5️⃣ اگر موجودی کیف پول شما تمام شود، سرویس به صورت خودکار غیرفعال می‌شود.\n\n"
+
             "6️⃣ اشتراک‌گذاری، فروش مجدد یا استفاده عمومی از لینک سرویس ممنوع است.\n\n"
-            "در صورت موافقت، تایید کنید.",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(keyboard),
+
+            "7️⃣ با توجه به شرایط اینترنت، احتمال اختلال یا قطعی موقت وجود دارد و تضمین اتصال دائمی ۱۰۰٪ وجود ندارد.\n\n"
+
+            "⚠️ در صورت موافقت، گزینه «تایید قوانین و فعال‌سازی» را انتخاب کنید."
         )
+
+        await query.edit_message_text(
+            msg,
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
         return
 
     if data == "usage_activate":
@@ -960,37 +1040,112 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if data == "deposit":
+    elif data == "deposit":
+
         keyboard = [
-            [InlineKeyboardButton("✅ متوجه شدم", callback_data="deposit_networks")],
-            [InlineKeyboardButton("❌ انصراف", callback_data="balance")],
+
+            [
+                InlineKeyboardButton(
+                    "✅ متوجه شدم",
+                    callback_data="deposit_networks"
+                )
+            ],
+
+            [
+                InlineKeyboardButton(
+                    "❌ انصراف",
+                    callback_data="balance"
+                )
+            ]
         ]
-        await query.edit_message_text(
+
+        msg = (
             "📌 راهنمای شارژ کیف پول\n\n"
-            "پس از انتخاب شبکه و مبلغ، TX Hash یا لینک تراکنش را ارسال می‌کنید.\n\n"
-            "⚠️ شبکه و مبلغ را دقیق انتخاب کنید.",
-            reply_markup=InlineKeyboardMarkup(keyboard),
+
+            "💡 برای شارژ حساب می‌توانید از صرافی‌هایی مثل:\n"
+            "• نوبیتکس\n"
+            "• بیت پین\n\n"
+
+            "استفاده کنید.\n\n"
+
+            "━━━━━━━━━━━━━━━\n\n"
+
+            "⚠️ نکات مهم:\n\n"
+
+            "• حتماً شبکه صحیح را انتخاب کنید.\n"
+            "• مبلغ را دقیق ارسال کنید.\n"
+            "• پس از پرداخت، TX Hash را ارسال کنید.\n"
+            "• در صورت انتخاب شبکه اشتباه، پرداخت قابل بازیابی نیست.\n"
+            "• توصیه می‌شود از شبکه TON استفاده کنید چون کارمزد بسیار کمتری دارد.\n\n"
+
+            "━━━━━━━━━━━━━━━\n\n"
+
+            "✅ پس از مطالعه، روی «متوجه شدم» بزنید."
         )
+
+        await query.edit_message_text(
+            msg,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
         return
 
-    if data == "deposit_networks":
+    elif data == "deposit_networks":
+
         keyboard = [
+
             [
-                InlineKeyboardButton("💎 TON", callback_data="net_ton"),
-                InlineKeyboardButton("💵 USDT (TON)", callback_data="net_usdt_ton"),
+                InlineKeyboardButton(
+                    "💎 TON",
+                    callback_data="net_ton"
+                ),
+
+                InlineKeyboardButton(
+                    "💵 USDT (TON)",
+                    callback_data="net_usdt_ton"
+                )
             ],
+
             [
-                InlineKeyboardButton("🔺 TRON", callback_data="net_tron"),
-                InlineKeyboardButton("💵 USDT (TRC20)", callback_data="net_usdt_tron"),
+                InlineKeyboardButton(
+                    "🔺 TRON",
+                    callback_data="net_tron"
+                ),
+
+                InlineKeyboardButton(
+                    "💵 USDT (TRC20)",
+                    callback_data="net_usdt_tron"
+                )
             ],
-            [InlineKeyboardButton("💵 USDT (BEP20)", callback_data="net_usdt_bsc")],
-            [InlineKeyboardButton("🪙 Litecoin", callback_data="net_ltc")],
-            [InlineKeyboardButton("🔙 بازگشت", callback_data="balance")],
+
+            [
+                InlineKeyboardButton(
+                    "💵 USDT (BEP20)",
+                    callback_data="net_usdt_bsc"
+                )
+            ],
+
+            [
+                InlineKeyboardButton(
+                    "🪙 Litecoin",
+                    callback_data="net_ltc"
+                )
+            ],
+
+            [
+                InlineKeyboardButton(
+                    "🔙 بازگشت",
+                    callback_data="balance"
+                )
+            ]
         ]
+
         await query.edit_message_text(
-            "💳 شبکه پرداخت را انتخاب کنید:",
-            reply_markup=InlineKeyboardMarkup(keyboard),
+            "💳 شبکه پرداخت را انتخاب کنید:\n\n"
+            "💡 توصیه می‌شود از شبکه TON به دلیل کارمزد کمتر استفاده کنید.",
+            reply_markup=InlineKeyboardMarkup(keyboard)
         )
+
         return
 
     if data.startswith("net_"):
@@ -1018,10 +1173,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "custom_charge":
         context.user_data["waiting_custom_amount"] = True
         await query.edit_message_text(
-            "💵 مبلغ دلخواه را وارد کنید.\n\nمثال:\n`2.5`",
+            "💵 مبلغ دلخواه را وارد کنید.\n\n"
+            "مثال:\n"
+            "`2.5`",
             parse_mode="Markdown",
-            reply_markup=back_keyboard("deposit_networks"),
+            reply_markup=back_keyboard("deposit")
         )
+
         return
 
     if data.startswith("charge_"):
@@ -1191,8 +1349,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "admin_balance_add":
         if not is_admin(user_id):
             return
-        context.user_data["admin_balance_add_mode"] = True
         context.user_data.pop("admin_balance_sub_mode", None)
+        context.user_data.pop("waiting_panel_setting_key", None)
+        context.user_data.pop("waiting_panel_setting_title", None)
+        context.user_data.pop("waiting_price_key", None)
+        context.user_data.pop("waiting_price_title", None)
+        context.user_data.pop("waiting_custom_amount", None)
+        context.user_data.pop("waiting_tx", None)
+        context.user_data.pop("deposit_id", None)
+        context.user_data["admin_balance_add_mode"] = True
         await query.edit_message_text(
             "➕ افزایش موجودی\n\nفرمت:\n`USER_ID AMOUNT`\n\nمثال:\n`951760796 5`",
             parse_mode="Markdown",
@@ -1203,8 +1368,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "admin_balance_sub":
         if not is_admin(user_id):
             return
-        context.user_data["admin_balance_sub_mode"] = True
         context.user_data.pop("admin_balance_add_mode", None)
+        context.user_data.pop("waiting_panel_setting_key", None)
+        context.user_data.pop("waiting_panel_setting_title", None)
+        context.user_data.pop("waiting_price_key", None)
+        context.user_data.pop("waiting_price_title", None)
+        context.user_data.pop("waiting_custom_amount", None)
+        context.user_data.pop("waiting_tx", None)
+        context.user_data.pop("deposit_id", None)
         await query.edit_message_text(
             "➖ کاهش موجودی\n\nفرمت بدون منفی:\n`USER_ID AMOUNT`\n\nمثال:\n`951760796 0.5`",
             parse_mode="Markdown",

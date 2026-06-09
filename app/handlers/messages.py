@@ -1,12 +1,14 @@
 from telegram.ext import ContextTypes
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-
+from app.config import TON_WALLET, TRON_WALLET, BSC_WALLET, LTC_WALLET
 from app.database import get_db
+
 from app.keyboards import (
     admin_keyboard,
     balance_admin_keyboard,
     panel_settings_keyboard,
     pricing_admin_keyboard,
+    back_keyboard,
 )
 from app.utils import (
     generate_deposit_id,
@@ -71,6 +73,137 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown",
             )
             return
+
+  # =====================================================
+    # ADMIN BALANCE ADD / SUBTRACT
+    # =====================================================
+
+    if (
+        context.user_data.get("admin_balance_add_mode")
+        or context.user_data.get("admin_balance_sub_mode")
+    ):
+        if not is_admin(user_id):
+            return
+
+        try:
+            target_id, amount = text.split()
+
+            target_id = int(target_id)
+            amount = abs(float(amount))
+
+            is_sub = context.user_data.get("admin_balance_sub_mode")
+            change_amount = -amount if is_sub else amount
+
+            conn = get_db()
+
+            row = conn.execute(
+                """
+                SELECT balance
+                FROM users
+                WHERE user_id=?
+                """,
+                (target_id,),
+            ).fetchone()
+
+            if not row:
+                conn.close()
+                await update.message.reply_text(
+                    "❌ کاربر پیدا نشد."
+                )
+                return
+
+            current_balance = float(row["balance"] or 0)
+
+            if is_sub and current_balance < amount:
+                conn.close()
+                await update.message.reply_text(
+                    "❌ موجودی کاربر کافی نیست.\n\n"
+                    f"💰 موجودی فعلی کاربر: `{current_balance:.2f}$`",
+                    parse_mode="Markdown",
+                )
+                return
+
+            conn.execute(
+                """
+                UPDATE users
+                SET balance = balance + ?
+                WHERE user_id=?
+                """,
+                (
+                    change_amount,
+                    target_id,
+                ),
+            )
+
+            new_balance = conn.execute(
+                """
+                SELECT balance
+                FROM users
+                WHERE user_id=?
+                """,
+                (target_id,),
+            ).fetchone()["balance"]
+
+            conn.commit()
+            conn.close()
+
+            if is_sub:
+                user_msg = (
+                    f"⚠️ مبلغ `{amount:.2f}$` از موجودی حساب شما کسر شد.\n"
+                    f"💰 موجودی جدید: `{new_balance:.2f}$`"
+                )
+
+                admin_msg = (
+                    "✅ موجودی کاربر کاهش یافت.\n\n"
+                    f"👤 User ID: `{target_id}`\n"
+                    f"➖ مبلغ کسر شده: `{amount:.2f}$`\n"
+                    f"💰 موجودی جدید: `{new_balance:.2f}$`"
+                )
+
+            else:
+                user_msg = (
+                    f"✅ حساب شما `{amount:.2f}$` شارژ شد.\n"
+                    f"💰 موجودی جدید: `{new_balance:.2f}$`"
+                )
+
+                admin_msg = (
+                    "✅ موجودی کاربر افزایش یافت.\n\n"
+                    f"👤 User ID: `{target_id}`\n"
+                    f"➕ مبلغ اضافه شده: `{amount:.2f}$`\n"
+                    f"💰 موجودی جدید: `{new_balance:.2f}$`"
+                )
+
+            try:
+                await context.bot.send_message(
+                    target_id,
+                    user_msg,
+                    parse_mode="Markdown",
+                )
+            except Exception:
+                pass
+
+            await update.message.reply_text(
+                admin_msg,
+                parse_mode="Markdown",
+                reply_markup=balance_admin_keyboard(),
+            )
+
+            context.user_data.pop("admin_balance_add_mode", None)
+            context.user_data.pop("admin_balance_sub_mode", None)
+
+            return
+
+        except Exception:
+            await update.message.reply_text(
+                "❌ فرمت اشتباه است.\n\n"
+                "فرمت صحیح:\n"
+                "`USER_ID AMOUNT`\n\n"
+                "مثال:\n"
+                "`951760796 5`",
+                parse_mode="Markdown",
+            )
+            return
+
 
     # =====================================================
     # ADMIN PANEL SETTINGS
@@ -170,10 +303,44 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
             network = context.user_data.get("selected_network", "ton")
+            network = str(network).lower()
+
+            if network == "ton":
+                wallet = TON_WALLET
+                network_name = "TON"
+
+            elif network == "usdt_ton":
+                wallet = TON_WALLET
+                network_name = "USDT - TON"
+
+            elif network == "tron":
+                wallet = TRON_WALLET
+                network_name = "TRON"
+
+            elif network == "usdt_tron":
+                wallet = TRON_WALLET
+                network_name = "USDT - TRC20"
+
+            elif network == "usdt_bsc":
+                wallet = BSC_WALLET
+                network_name = "USDT - BEP20"
+
+            elif network == "ltc":
+                wallet = LTC_WALLET
+                network_name = "Litecoin"
+
+            else:
+                wallet = TON_WALLET
+                network_name = "TON"
+
+            if not wallet:
+                await update.message.reply_text(
+                    "❌ آدرس کیف پول این شبکه تنظیم نشده است.\n\n"
+                    "لطفاً از شبکه دیگری استفاده کنید یا به پشتیبانی پیام دهید."
+                )
+                return
 
             deposit_id = generate_deposit_id(network.upper())
-
-            network_name = network.upper()
 
             conn = get_db()
 
@@ -205,13 +372,20 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["deposit_id"] = deposit_id
 
             await update.message.reply_text(
-                "💳 درخواست شارژ ساخته شد.\n\n"
-                f"🧾 شماره شارژ:\n"
-                f"`{deposit_id}`\n\n"
+                "💳 اطلاعات پرداخت\n\n"
+                "━━━━━━━━━━━━━━━\n\n"
+                f"🌐 شبکه:\n"
+                f"`{network_name}`\n\n"
                 f"💰 مبلغ:\n"
                 f"`{amount:.2f}$`\n\n"
-                "حالا TX Hash یا لینک تراکنش را ارسال کنید.",
+                f"🏦 آدرس کیف پول:\n"
+                f"`{wallet}`\n\n"
+                f"🧾 شماره شارژ:\n"
+                f"`{deposit_id}`\n\n"
+                "📤 پس از پرداخت، TX Hash یا لینک تراکنش را ارسال کنید.\n\n"
+                "❌ برای لغو عملیات، روی بازگشت بزنید.",
                 parse_mode="Markdown",
+                reply_markup=back_keyboard("deposit")
             )
 
             return
@@ -433,136 +607,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-    # =====================================================
-    # ADMIN BALANCE ADD / SUBTRACT
-    # =====================================================
-
-    if (
-        context.user_data.get("admin_balance_add_mode")
-        or context.user_data.get("admin_balance_sub_mode")
-    ):
-        if not is_admin(user_id):
-            return
-
-        try:
-            target_id, amount = text.split()
-
-            target_id = int(target_id)
-            amount = abs(float(amount))
-
-            is_sub = context.user_data.get("admin_balance_sub_mode")
-            change_amount = -amount if is_sub else amount
-
-            conn = get_db()
-
-            row = conn.execute(
-                """
-                SELECT balance
-                FROM users
-                WHERE user_id=?
-                """,
-                (target_id,),
-            ).fetchone()
-
-            if not row:
-                conn.close()
-                await update.message.reply_text(
-                    "❌ کاربر پیدا نشد."
-                )
-                return
-
-            current_balance = float(row["balance"] or 0)
-
-            if is_sub and current_balance < amount:
-                conn.close()
-                await update.message.reply_text(
-                    "❌ موجودی کاربر کافی نیست.\n\n"
-                    f"💰 موجودی فعلی کاربر: `{current_balance:.2f}$`",
-                    parse_mode="Markdown",
-                )
-                return
-
-            conn.execute(
-                """
-                UPDATE users
-                SET balance = balance + ?
-                WHERE user_id=?
-                """,
-                (
-                    change_amount,
-                    target_id,
-                ),
-            )
-
-            new_balance = conn.execute(
-                """
-                SELECT balance
-                FROM users
-                WHERE user_id=?
-                """,
-                (target_id,),
-            ).fetchone()["balance"]
-
-            conn.commit()
-            conn.close()
-
-            if is_sub:
-                user_msg = (
-                    f"⚠️ مبلغ `{amount:.2f}$` از موجودی حساب شما کسر شد.\n"
-                    f"💰 موجودی جدید: `{new_balance:.2f}$`"
-                )
-
-                admin_msg = (
-                    "✅ موجودی کاربر کاهش یافت.\n\n"
-                    f"👤 User ID: `{target_id}`\n"
-                    f"➖ مبلغ کسر شده: `{amount:.2f}$`\n"
-                    f"💰 موجودی جدید: `{new_balance:.2f}$`"
-                )
-
-            else:
-                user_msg = (
-                    f"✅ حساب شما `{amount:.2f}$` شارژ شد.\n"
-                    f"💰 موجودی جدید: `{new_balance:.2f}$`"
-                )
-
-                admin_msg = (
-                    "✅ موجودی کاربر افزایش یافت.\n\n"
-                    f"👤 User ID: `{target_id}`\n"
-                    f"➕ مبلغ اضافه شده: `{amount:.2f}$`\n"
-                    f"💰 موجودی جدید: `{new_balance:.2f}$`"
-                )
-
-            try:
-                await context.bot.send_message(
-                    target_id,
-                    user_msg,
-                    parse_mode="Markdown",
-                )
-            except Exception:
-                pass
-
-            await update.message.reply_text(
-                admin_msg,
-                parse_mode="Markdown",
-                reply_markup=balance_admin_keyboard(),
-            )
-
-            context.user_data.pop("admin_balance_add_mode", None)
-            context.user_data.pop("admin_balance_sub_mode", None)
-
-            return
-
-        except Exception:
-            await update.message.reply_text(
-                "❌ فرمت اشتباه است.\n\n"
-                "فرمت صحیح:\n"
-                "`USER_ID AMOUNT`\n\n"
-                "مثال:\n"
-                "`951760796 5`",
-                parse_mode="Markdown",
-            )
-            return
-
+  
     # =====================================================
     # ADMIN ADD
     # =====================================================
