@@ -18,8 +18,10 @@ from app.keyboards import (
     main_menu_keyboard,
     panel_settings_keyboard,
     pricing_admin_keyboard,
+    trial_admin_keyboard,
 )
 from app.services.referrals import reward_referral_if_needed
+from app.services.trials import award_trial_bonus_if_eligible
 from app.services.sync import sync_services_with_panel
 from app.services.xui import XUIManager
 
@@ -31,6 +33,9 @@ from app.utils import (
     generate_invoice_id,
     get_all_admins,
     get_float_setting,
+    get_int_setting,
+    get_setting,
+    set_setting,
     get_panel_inbound_id,
     get_panel_password,
     get_panel_sub_base_url,
@@ -248,7 +253,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         total_paid = conn.execute("SELECT COUNT(*) AS c FROM invoices").fetchone()["c"]
         total_income = conn.execute("SELECT SUM(amount) AS s FROM invoices").fetchone()["s"] or 0
         total_balance = conn.execute("SELECT SUM(balance) AS s FROM users").fetchone()["s"] or 0
-        total_tests = conn.execute("SELECT COUNT(*) AS c FROM free_test").fetchone()["c"]
+        total_tests = conn.execute("SELECT COUNT(*) AS c FROM trial_services").fetchone()["c"]
         conn.close()
 
         await query.edit_message_text(
@@ -427,12 +432,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.commit()
         conn.close()
 
+        bonus_ok, bonus_amount = award_trial_bonus_if_eligible(target_user_id)
+
         try:
+            bonus_text = ""
+            if bonus_ok:
+                bonus_text = f"\n🎁 هدیه تست فوری: `{bonus_amount:.2f}$` به کیف پول شما اضافه شد.\n"
+
             await context.bot.send_message(
                 target_user_id,
                 "✅ شارژ کیف پول شما تایید شد.\n\n"
                 f"💰 مبلغ اضافه‌شده: `{amount:.2f}$`\n"
-                f"💳 موجودی جدید: `{float(new_balance):.2f}$`",
+                f"💳 موجودی جدید: `{float(new_balance):.2f}$`"
+                f"{bonus_text}",
                 parse_mode="Markdown",
             )
         except Exception:
@@ -652,6 +664,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.commit()
         conn.close()
 
+        bonus_ok, bonus_amount = award_trial_bonus_if_eligible(user_id)
+        if bonus_ok:
+            try:
+                await context.bot.send_message(
+                    user_id,
+                    "🎁 هدیه تست فوری فعال شد\n\n"
+                    f"`{bonus_amount:.2f}$` اعتبار رایگان به کیف پول شما اضافه شد.",
+                    parse_mode="Markdown",
+                )
+            except Exception:
+                pass
+
         await send_service_to_user(context, user_id, invoice_id, plan_text, service_data)
 
         referral_reward = reward_referral_if_needed(user_id, invoice_id)
@@ -858,6 +882,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.commit()
         conn.close()
 
+        bonus_ok, bonus_amount = award_trial_bonus_if_eligible(user_id)
+        if bonus_ok:
+            try:
+                await context.bot.send_message(
+                    user_id,
+                    "🎁 هدیه تست فوری فعال شد\n\n"
+                    f"`{bonus_amount:.2f}$` اعتبار رایگان به کیف پول شما اضافه شد.",
+                    parse_mode="Markdown",
+                )
+            except Exception:
+                pass
+
         await send_service_to_user(context, user_id, invoice_id, plan_text, service_data)
 
         await notify_admins(
@@ -878,9 +914,82 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # Referral
+    if data == "referral":
+
+        bot_username = (await context.bot.get_me()).username
+
+        referral_link = f"https://t.me/{bot_username}?start={user_id}"
+
+        reward = get_float_setting("referral_reward", 0.25)
+
+        conn = get_db()
+
+        invited_count = conn.execute(
+            """
+            SELECT COUNT(*) AS c
+            FROM users
+            WHERE referrer_id=?
+            """,
+            (user_id,),
+        ).fetchone()["c"]
+
+        rewarded_count = conn.execute(
+            """
+            SELECT COUNT(*) AS c
+            FROM referral_rewards
+            WHERE referrer_id=?
+            """,
+            (user_id,),
+        ).fetchone()["c"]
+
+        total_reward_row = conn.execute(
+            """
+            SELECT SUM(amount) AS s
+            FROM referral_rewards
+            WHERE referrer_id=?
+            """,
+            (user_id,),
+        ).fetchone()
+
+        conn.close()
+
+        total_reward = total_reward_row["s"] if total_reward_row and total_reward_row["s"] else 0
+
+        msg = (
+            "👥 سیستم دعوت دوستان\n\n"
+            "━━━━━━━━━━━━━━━\n\n"
+            "🎁 جایزه دعوت:\n"
+            f"`{reward:.2f}$`\n\n"
+            "✅ جایزه فقط بعد از اولین خرید موفق دوست شما اضافه می‌شود.\n"
+            "✅ برای هر کاربر دعوت‌شده فقط یک بار جایزه دریافت می‌کنید.\n\n"
+            "━━━━━━━━━━━━━━━\n\n"
+            "📊 آمار دعوت شما:\n\n"
+            f"👤 تعداد افراد دعوت‌شده:\n"
+            f"`{invited_count}`\n\n"
+            f"💰 تعداد جایزه‌های دریافت‌شده:\n"
+            f"`{rewarded_count}`\n\n"
+            f"🎁 مجموع جایزه دریافتی:\n"
+            f"`{float(total_reward):.2f}$`\n\n"
+            "━━━━━━━━━━━━━━━\n\n"
+            "🔗 لینک دعوت شما:\n\n"
+            f"`{referral_link}`"
+        )
+
+        await query.edit_message_text(
+            msg,
+            parse_mode="Markdown",
+            reply_markup=back_keyboard()
+        )
+
+        return
+
     # My services
     if data == "my_services":
-        sync_services_with_panel(user_id)
+        # try:
+        #     sync_services_with_panel(user_id)
+        # except Exception as e:
+        #     print("SYNC SERVICES ERROR:", e)
 
         conn = get_db()
         rows = conn.execute(
@@ -889,7 +998,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                    usage_total_bytes, usage_charged_amount, usage_disabled, created_at
             FROM invoices
             WHERE user_id=?
-            AND status != 'PANEL_DELETED'
+            
             ORDER BY created_at DESC
             LIMIT 10
             """,
@@ -915,7 +1024,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             type_text = "⚡ مصرفی" if service_type == "usage" else "📦 حجمی ثابت"
 
-            if usage_disabled == 1:
+            if status == "PANEL_DELETED":
+                status_text = "🔴 حذف‌شده از پنل / غیرفعال"
+            elif usage_disabled == 1:
                 status_text = "🚫 غیرفعال"
             elif status == "DELIVERED":
                 status_text = "🟢 فعال"
@@ -939,9 +1050,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             text += f"📅 تاریخ: `{row['created_at']}`\n━━━━━━━━━━━━━━━\n\n"
 
+            if status == "PANEL_DELETED":
+                btn_text = f"🚫 جزئیات سرویس حذف‌شده {invoice_id}"
+            else:
+                btn_text = f"🔗 لینک سرویس {invoice_id}"
+
             keyboard.append([
                 InlineKeyboardButton(
-                    f"🔗 لینک سرویس {invoice_id}",
+                    btn_text,
                     callback_data=f"service_detail_{invoice_id}",
                 )
             ])
@@ -962,9 +1078,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         row = conn.execute(
             """
             SELECT invoice_id, plan, amount, service_type, status, sub_link, vless_link,
-                   usage_total_bytes, usage_charged_amount, usage_disabled, created_at
+                usage_total_bytes, usage_charged_amount, usage_disabled, created_at
             FROM invoices
-            WHERE invoice_id=? AND user_id=? AND status != 'PANEL_DELETED'
+            WHERE invoice_id=? AND user_id=?
             """,
             (invoice_id, user_id),
         ).fetchone()
@@ -979,6 +1095,27 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         service_type = row["service_type"]
         type_text = "⚡ مصرفی" if service_type == "usage" else "📦 حجمی ثابت"
+
+        if row["status"] == "PANEL_DELETED":
+            text = (
+                "🚫 جزئیات سرویس\n\n"
+                "━━━━━━━━━━━━━━━\n\n"
+                f"🧾 فاکتور:\n`{row['invoice_id']}`\n\n"
+                f"📌 نوع سرویس:\n{type_text}\n\n"
+                f"📦 پلن:\n`{row['plan']}`\n\n"
+                "📡 وضعیت:\n🔴 حذف‌شده از پنل / غیرفعال\n\n"
+                f"📅 تاریخ:\n`{row['created_at']}`"
+            )
+
+            await query.edit_message_text(
+                text,
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔙 برگشت به اشتراک‌های من", callback_data="my_services")],
+                    [InlineKeyboardButton("🏠 منوی اصلی", callback_data="main_menu")],
+                ]),
+            )
+            return
 
         if int(row["usage_disabled"] or 0) == 1:
             status_text = "🚫 غیرفعال"
@@ -1172,6 +1309,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "custom_charge":
         context.user_data["waiting_custom_amount"] = True
+        context.user_data.pop("admin_balance_add_mode", None)
+        context.user_data.pop("admin_balance_sub_mode", None)
+        context.user_data.pop("waiting_panel_setting_key", None)
+        context.user_data.pop("waiting_panel_setting_title", None)
+        context.user_data.pop("waiting_price_key", None)
+        context.user_data.pop("waiting_price_title", None)
+        context.user_data.pop("waiting_trial_setting_key", None)
+        context.user_data.pop("waiting_trial_setting_title", None)
         await query.edit_message_text(
             "💵 مبلغ دلخواه را وارد کنید.\n\n"
             "مثال:\n"
@@ -1188,121 +1333,257 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await create_deposit_invoice(query, context, user_id, amount, network)
         return
 
-    # Free test
+    # Instant trial
     if data == "free_test":
-        conn = get_db()
-        try:
-            conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute(
-                """
-                SELECT id, vless, max_users, used_users, is_active
-                FROM free_test
-                WHERE is_active=1
-                ORDER BY id DESC
-                LIMIT 1
-                """
-            ).fetchone()
+        enabled = get_setting("trial_enabled", "1")
+        trial_minutes = get_int_setting("trial_minutes", 30)
+        trial_gb = get_float_setting("trial_gb", 0.5)
+        wallet_bonus = get_float_setting("trial_wallet_bonus", 0.10)
+        bonus_window = get_int_setting("trial_bonus_window_minutes", 30)
 
-            if not row:
-                conn.rollback()
-                await query.edit_message_text("❌ تست رایگان فعال نیست.", reply_markup=back_keyboard())
-                return
-
-            test_id = row["id"]
-            vless = row["vless"]
-            max_users = int(row["max_users"] or 0)
-            used_users = int(row["used_users"] or 0)
-
-            already = conn.execute(
-                "SELECT id FROM free_test_claims WHERE user_id=? AND test_id=?",
-                (user_id, test_id),
-            ).fetchone()
-
-            if already:
-                conn.rollback()
-                await query.edit_message_text(
-                    "❌ شما این اشتراک تست را قبلاً دریافت کرده‌اید.",
-                    reply_markup=back_keyboard(),
-                )
-                return
-
-            if used_users >= max_users:
-                conn.execute("UPDATE free_test SET is_active=0 WHERE id=?", (test_id,))
-                conn.commit()
-                await query.edit_message_text("❌ ظرفیت تست رایگان تکمیل شده.", reply_markup=back_keyboard())
-                return
-
-            conn.execute(
-                "INSERT INTO free_test_claims(user_id, test_id) VALUES(?,?)",
-                (user_id, test_id),
+        if str(enabled) != "1":
+            await query.edit_message_text(
+                "❌ تست فوری فعلاً غیرفعال است.",
+                reply_markup=back_keyboard(),
             )
-            new_used = used_users + 1
-            conn.execute("UPDATE free_test SET used_users=? WHERE id=?", (new_used, test_id))
-            if new_used >= max_users:
-                conn.execute("UPDATE free_test SET is_active=0 WHERE id=?", (test_id,))
+            return
 
-            conn.commit()
+        keyboard = [
+            [InlineKeyboardButton("✅ شروع تست فوری", callback_data="start_trial")],
+            [InlineKeyboardButton("📚 آموزش اتصال", callback_data="tutorial")],
+            [InlineKeyboardButton("🏠 منوی اصلی", callback_data="main_menu")],
+        ]
+
+        await query.edit_message_text(
+            "🚀 تست فوری رایگان KaleVPN\n\n"
+            "━━━━━━━━━━━━━━━\n\n"
+            f"⏳ مدت تست: `{trial_minutes} دقیقه`\n"
+            f"📦 حجم تست: `{trial_gb}GB`\n\n"
+            "بدون پرداخت اولیه، همین الان کیفیت اتصال را تست کنید.\n\n"
+            f"🎁 اگر تا `{bonus_window} دقیقه` بعد از تست کیف پول خود را شارژ کنید، "
+            f"`{wallet_bonus:.2f}$` اعتبار رایگان دریافت می‌کنید.",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
+        return
+
+    if data == "start_trial":
+        enabled = get_setting("trial_enabled", "1")
+        trial_minutes = get_int_setting("trial_minutes", 30)
+        trial_gb = get_float_setting("trial_gb", 0.5)
+        max_per_user = get_int_setting("trial_max_per_user", 1)
+        bonus_window = get_int_setting("trial_bonus_window_minutes", 30)
+        wallet_bonus = get_float_setting("trial_wallet_bonus", 0.10)
+
+        if str(enabled) != "1":
+            await query.edit_message_text("❌ تست فوری فعلاً غیرفعال است.", reply_markup=back_keyboard())
+            return
+
+        conn = get_db()
+        used_count = conn.execute(
+            """
+            SELECT COUNT(*) AS c
+            FROM trial_services
+            WHERE user_id=?
+            """,
+            (user_id,),
+        ).fetchone()["c"]
+
+        active = conn.execute(
+            """
+            SELECT invoice_id, sub_link, vless_link, expires_at
+            FROM trial_services
+            WHERE user_id=?
+            AND status='TRIAL_ACTIVE'
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (user_id,),
+        ).fetchone()
+        conn.close()
+
+        if active:
+            text = (
+                "🚀 تست فوری شما قبلاً فعال شده است\n\n"
+                f"⏳ پایان تست:\n`{active['expires_at']}`\n\n"
+                f"🔗 لینک Subscription:\n`{active['sub_link']}`\n\n"
+            )
+            if active["vless_link"]:
+                text += f"📡 کانفیگ مستقیم:\n`{active['vless_link']}`\n\n"
 
             await query.edit_message_text(
-                "🆓 اشتراک تست رایگان\n\n"
-                "━━━━━━━━━━━━━━━\n\n"
-                f"📥 کانفیگ تست:\n\n`{vless}`\n\n"
-                f"👥 ظرفیت باقی‌مانده: `{max_users - new_used}`",
+                text,
                 parse_mode="Markdown",
                 reply_markup=back_keyboard(),
             )
             return
 
-        except Exception as e:
-            conn.rollback()
-            print("FREE TEST ERROR:", e)
-            await query.edit_message_text("❌ خطایی رخ داد.", reply_markup=back_keyboard())
+        if used_count >= max_per_user:
+            await query.edit_message_text(
+                "❌ شما قبلاً از تست فوری رایگان استفاده کرده‌اید.",
+                reply_markup=back_keyboard(),
+            )
             return
-        finally:
-            conn.close()
 
-    if data == "admin_test":
-        if not is_admin(user_id):
+        invoice_id = generate_invoice_id()
+        client_email = generate_client_email(user_id, invoice_id, "trial")
+
+        xui = XUIManager()
+        ok, panel_msg, service_data = xui.add_trial_client(
+            email=client_email,
+            limit_gb=trial_gb,
+            expiry_minutes=trial_minutes,
+        )
+
+        if not ok:
+            await query.edit_message_text(
+                "❌ ساخت تست فوری ناموفق بود.\n\n"
+                f"خطا:\n`{panel_msg}`",
+                parse_mode="Markdown",
+                reply_markup=back_keyboard(),
+            )
             return
 
         conn = get_db()
-        tests = conn.execute(
+        conn.execute(
             """
-            SELECT id, max_users, used_users, is_active, created_at
-            FROM free_test
-            ORDER BY id DESC
-            LIMIT 10
-            """
-        ).fetchall()
+            INSERT INTO trial_services(
+                user_id, invoice_id, client_email, client_uuid, sub_id,
+                sub_link, vless_link, status, trial_gb, trial_minutes,
+                expires_at, bonus_expires_at
+            )
+            VALUES(
+                ?,?,?,?,?,?,?, 'TRIAL_ACTIVE', ?, ?,
+                datetime('now', ?),
+                datetime('now', ?)
+            )
+            """,
+            (
+                user_id,
+                invoice_id,
+                service_data.get("email"),
+                service_data.get("uuid"),
+                service_data.get("sub_id"),
+                service_data.get("sub_link"),
+                service_data.get("vless_link"),
+                trial_gb,
+                trial_minutes,
+                f"+{trial_minutes} minutes",
+                f"+{trial_minutes + bonus_window} minutes",
+            ),
+        )
+        conn.commit()
         conn.close()
 
-        text = "🆓 مدیریت تست رایگان\n\n"
-        if not tests:
-            text += "❌ هیچ تستی ثبت نشده."
-        else:
-            for t in tests:
-                status = "🟢 فعال" if int(t["is_active"] or 0) == 1 else "🔴 غیرفعال"
-                text += (
-                    f"🧾 ID: `{t['id']}`\n"
-                    f"👥 کاربران: `{t['used_users']}/{t['max_users']}`\n"
-                    f"📡 وضعیت: {status}\n\n"
-                )
+        text = (
+            "✅ تست فوری شما فعال شد\n\n"
+            "━━━━━━━━━━━━━━━\n\n"
+            f"⏳ مدت: `{trial_minutes} دقیقه`\n"
+            f"📦 حجم: `{trial_gb}GB`\n\n"
+            f"🔗 لینک Subscription:\n`{service_data.get('sub_link')}`\n\n"
+        )
+
+        if service_data.get("vless_link"):
+            text += f"📡 کانفیگ مستقیم:\n`{service_data.get('vless_link')}`\n\n"
+
+        text += (
+            "━━━━━━━━━━━━━━━\n\n"
+            f"🎁 اگر تا `{bonus_window} دقیقه` بعد از تست کیف پول خود را شارژ کنید، "
+            f"`{wallet_bonus:.2f}$` اعتبار رایگان دریافت می‌کنید."
+        )
 
         await query.edit_message_text(
             text,
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("➕ افزودن تست", callback_data="add_test")],
-                [InlineKeyboardButton("🔙 بازگشت", callback_data="admin_panel")],
+                [InlineKeyboardButton("💳 شارژ کیف پول", callback_data="deposit")],
+                [InlineKeyboardButton("📚 آموزش اتصال", callback_data="tutorial")],
+                [InlineKeyboardButton("🏠 منوی اصلی", callback_data="main_menu")],
             ]),
         )
         return
 
-    if data == "add_test":
+    if data == "admin_test":
         if not is_admin(user_id):
             return
-        context.user_data["waiting_test_vless"] = True
-        await query.edit_message_text("🆓 کانفیگ VLESS تست را ارسال کنید.")
+
+        enabled = get_setting("trial_enabled", "1")
+        trial_minutes = get_int_setting("trial_minutes", 30)
+        trial_gb = get_float_setting("trial_gb", 0.5)
+        wallet_bonus = get_float_setting("trial_wallet_bonus", 0.10)
+        bonus_window = get_int_setting("trial_bonus_window_minutes", 30)
+        max_per_user = get_int_setting("trial_max_per_user", 1)
+
+        conn = get_db()
+        total_trials = conn.execute("SELECT COUNT(*) AS c FROM trial_services").fetchone()["c"]
+        active_trials = conn.execute("SELECT COUNT(*) AS c FROM trial_services WHERE status='TRIAL_ACTIVE'").fetchone()["c"]
+        expired_trials = conn.execute("SELECT COUNT(*) AS c FROM trial_services WHERE status='TRIAL_EXPIRED'").fetchone()["c"]
+        rewarded_trials = conn.execute("SELECT COUNT(*) AS c FROM trial_services WHERE bonus_claimed=1").fetchone()["c"]
+        conn.close()
+
+        status_text = "🟢 فعال" if str(enabled) == "1" else "🔴 غیرفعال"
+
+        await query.edit_message_text(
+            "🚀 مدیریت تست فوری\n\n"
+            "━━━━━━━━━━━━━━━\n\n"
+            f"📡 وضعیت: {status_text}\n"
+            f"⏳ مدت تست: `{trial_minutes} دقیقه`\n"
+            f"📦 حجم تست: `{trial_gb}GB`\n"
+            f"🎁 هدیه کیف پول: `{wallet_bonus:.2f}$`\n"
+            f"⏰ مهلت هدیه: `{bonus_window} دقیقه`\n"
+            f"🔁 تعداد مجاز هر کاربر: `{max_per_user}`\n\n"
+            "━━━━━━━━━━━━━━━\n\n"
+            f"📊 کل تست‌ها: `{total_trials}`\n"
+            f"🟢 تست‌های فعال: `{active_trials}`\n"
+            f"⏳ تست‌های تمام‌شده: `{expired_trials}`\n"
+            f"🎁 هدیه‌های پرداخت‌شده: `{rewarded_trials}`",
+            parse_mode="Markdown",
+            reply_markup=trial_admin_keyboard(),
+        )
+        return
+
+    if data == "trial_toggle":
+        if not is_admin(user_id):
+            return
+        current = get_setting("trial_enabled", "1")
+        new_value = "0" if str(current) == "1" else "1"
+        set_setting("trial_enabled", new_value)
+        await query.edit_message_text(
+            "✅ وضعیت تست فوری تغییر کرد.",
+            reply_markup=trial_admin_keyboard(),
+        )
+        return
+
+    if data in ["trial_set_minutes", "trial_set_gb", "trial_set_bonus", "trial_set_bonus_window", "trial_set_max"]:
+        if not is_admin(user_id):
+            return
+
+        trial_map = {
+            "trial_set_minutes": ("trial_minutes", "⏳ مدت تست", "مثال:\n`30`"),
+            "trial_set_gb": ("trial_gb", "📦 حجم تست", "مثال:\n`0.5`"),
+            "trial_set_bonus": ("trial_wallet_bonus", "🎁 هدیه کیف پول", "مثال:\n`0.10`"),
+            "trial_set_bonus_window": ("trial_bonus_window_minutes", "⏰ مهلت هدیه", "مثال:\n`30`"),
+            "trial_set_max": ("trial_max_per_user", "🔁 تعداد مجاز تست برای هر کاربر", "مثال:\n`1`"),
+        }
+
+        setting_key, title, example = trial_map[data]
+        context.user_data["waiting_trial_setting_key"] = setting_key
+        context.user_data["waiting_trial_setting_title"] = title
+        context.user_data.pop("admin_balance_add_mode", None)
+        context.user_data.pop("admin_balance_sub_mode", None)
+        context.user_data.pop("waiting_panel_setting_key", None)
+        context.user_data.pop("waiting_panel_setting_title", None)
+        context.user_data.pop("waiting_price_key", None)
+        context.user_data.pop("waiting_price_title", None)
+        context.user_data.pop("waiting_custom_amount", None)
+        context.user_data.pop("waiting_tx", None)
+        context.user_data.pop("deposit_id", None)
+
+        await query.edit_message_text(
+            f"{title}\n\nمقدار جدید را وارد کنید.\n\n{example}",
+            parse_mode="Markdown",
+            reply_markup=trial_admin_keyboard(),
+        )
         return
 
     # Tutorial/support
@@ -1376,6 +1657,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("waiting_custom_amount", None)
         context.user_data.pop("waiting_tx", None)
         context.user_data.pop("deposit_id", None)
+
+        context.user_data["admin_balance_sub_mode"] = True
+        
         await query.edit_message_text(
             "➖ کاهش موجودی\n\nفرمت بدون منفی:\n`USER_ID AMOUNT`\n\nمثال:\n`951760796 0.5`",
             parse_mode="Markdown",

@@ -104,6 +104,29 @@ def init_db():
     )
     """)
 
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS trial_services(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        invoice_id TEXT,
+        client_email TEXT,
+        client_uuid TEXT,
+        sub_id TEXT,
+        sub_link TEXT,
+        vless_link TEXT,
+        status TEXT DEFAULT 'TRIAL_ACTIVE',
+        trial_gb REAL DEFAULT 0.5,
+        trial_minutes INTEGER DEFAULT 30,
+        started_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        expires_at TEXT,
+        bonus_expires_at TEXT,
+        bonus_claimed INTEGER DEFAULT 0,
+        converted_at TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS referral_rewards(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -144,6 +167,13 @@ def init_db():
         "usage_low_balance_threshold": "0.25",
 
         "referral_reward": "0.25",
+
+        "trial_enabled": "1",
+        "trial_minutes": "30",
+        "trial_gb": "0.5",
+        "trial_wallet_bonus": "0.10",
+        "trial_bonus_window_minutes": "30",
+        "trial_max_per_user": "1",
 
         "panel_url": PANEL_URL or "",
         "panel_username": PANEL_USERNAME or "",

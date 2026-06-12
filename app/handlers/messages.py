@@ -539,75 +539,51 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
     # =====================================================
-    # ADMIN FREE TEST ADD
+    # ADMIN INSTANT TRIAL SETTINGS
     # =====================================================
 
-    if context.user_data.get("waiting_test_vless"):
+    if context.user_data.get("waiting_trial_setting_key"):
         if not is_admin(user_id):
             return
 
-        context.user_data["new_test_vless"] = text
-        context.user_data.pop("waiting_test_vless", None)
-        context.user_data["waiting_test_limit"] = True
-
-        await update.message.reply_text(
-            "👥 ظرفیت تست را عددی وارد کنید.\n\n"
-            "مثال:\n"
-            "`20`",
-            parse_mode="Markdown",
-        )
-        return
-
-    if context.user_data.get("waiting_test_limit"):
-        if not is_admin(user_id):
-            return
+        key = context.user_data.get("waiting_trial_setting_key")
+        title = context.user_data.get("waiting_trial_setting_title", "تنظیمات تست فوری")
 
         try:
-            max_users = int(text)
-            if max_users <= 0:
-                await update.message.reply_text("❌ ظرفیت باید بیشتر از صفر باشد.")
-                return
+            if key in ["trial_minutes", "trial_bonus_window_minutes", "trial_max_per_user"]:
+                value = int(float(text))
+                if value <= 0:
+                    await update.message.reply_text("❌ مقدار باید بیشتر از صفر باشد.")
+                    return
+            else:
+                value = float(text)
+                if value <= 0:
+                    await update.message.reply_text("❌ مقدار باید بیشتر از صفر باشد.")
+                    return
 
-            vless = context.user_data.get("new_test_vless")
-            if not vless:
-                context.user_data.pop("waiting_test_limit", None)
-                await update.message.reply_text("❌ کانفیگ تست پیدا نشد. دوباره تلاش کنید.")
-                return
+            set_setting(key, value)
 
-            conn = get_db()
-
-            conn.execute("UPDATE free_test SET is_active=0")
-
-            conn.execute(
-                """
-                INSERT INTO free_test(vless, max_users, used_users, is_active)
-                VALUES(?,?,0,1)
-                """,
-                (vless, max_users),
-            )
-
-            conn.commit()
-            conn.close()
-
-            context.user_data.pop("waiting_test_limit", None)
-            context.user_data.pop("new_test_vless", None)
+            context.user_data.pop("waiting_trial_setting_key", None)
+            context.user_data.pop("waiting_trial_setting_title", None)
 
             await update.message.reply_text(
-                "✅ تست رایگان جدید فعال شد.",
+                f"✅ {title} بروزرسانی شد.\n\n"
+                f"مقدار جدید:\n"
+                f"`{value}`",
+                parse_mode="Markdown",
                 reply_markup=admin_keyboard(),
             )
             return
 
         except Exception:
             await update.message.reply_text(
-                "❌ ظرفیت را فقط عدد وارد کنید.\n\n"
+                "❌ مقدار را فقط عددی وارد کنید.\n\n"
                 "مثال:\n"
-                "`20`",
+                "`30`",
                 parse_mode="Markdown",
             )
             return
 
-  
     # =====================================================
     # ADMIN ADD
     # =====================================================

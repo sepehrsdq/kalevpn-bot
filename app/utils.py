@@ -47,6 +47,13 @@ def get_float_setting(key, default=0):
         return float(default)
 
 
+def get_int_setting(key, default=0):
+    try:
+        return int(float(get_setting(key, default)))
+    except Exception:
+        return int(default)
+
+
 def get_panel_setting(key, env_value=None):
     value = get_setting(key, None)
 

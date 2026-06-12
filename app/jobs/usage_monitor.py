@@ -1,10 +1,11 @@
 import asyncio
 
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
 from app.database import get_db
 from app.services.billing import charge_usage
 from app.services.xui import XUIManager
 from app.utils import get_float_setting
-
 
 async def process_usage_billing(application):
     conn = get_db()
@@ -198,6 +199,107 @@ async def process_usage_billing(application):
                 print("DISABLE CLIENT ERROR:", disable_msg)
 
 
+async def process_trial_expiration(application):
+    conn = get_db()
+    rows = conn.execute(
+        """
+        SELECT id, user_id, invoice_id, client_email, trial_minutes, trial_gb, bonus_expires_at
+        FROM trial_services
+        WHERE status='TRIAL_ACTIVE'
+        AND expires_at IS NOT NULL
+        AND datetime(expires_at) <= datetime('now')
+        """
+    ).fetchall()
+    conn.close()
+
+    if not rows:
+        return
+
+    xui = XUIManager()
+
+    for row in rows:
+        trial_id = row["id"]
+        user_id = row["user_id"]
+        invoice_id = row["invoice_id"]
+        client_email = row["client_email"]
+
+        ok_disable, disable_msg = xui.disable_client(client_email)
+        if not ok_disable:
+            print("TRIAL DISABLE ERROR:", invoice_id, disable_msg)
+
+        conn = get_db()
+
+        user_row = conn.execute(
+            """
+            SELECT balance
+            FROM users
+            WHERE user_id=?
+            """,
+            (user_id,),
+        ).fetchone()
+
+        balance = float(user_row["balance"] or 0) if user_row else 0
+
+        conn.execute(
+            """
+            UPDATE trial_services
+            SET status='TRIAL_EXPIRED'
+            WHERE id=?
+            """,
+            (trial_id,),
+        )
+
+        conn.commit()
+        conn.close()
+
+        min_balance = get_float_setting("usage_min_balance", 1.00)
+        bonus_amount = get_float_setting("trial_wallet_bonus", 0.10)
+        bonus_window = int(get_float_setting("trial_bonus_window_minutes", 30))
+
+        if balance >= min_balance:
+            msg = (
+                "⏳ تست رایگان شما تمام شد\n\n"
+                "اگر اتصال و سرعت برایتان مناسب بود، می‌توانید سرویس اصلی خود را فعال کنید.\n\n"
+                f"💰 موجودی فعلی کیف پول شما:\n"
+                f"`{balance:.2f}$`\n\n"
+                f"🎁 اگر تا {bonus_window} دقیقه آینده سرویس فعال کنید، "
+                f"`{bonus_amount:.2f}$` اعتبار رایگان به کیف پول شما اضافه می‌شود.\n\n"
+                "برای ادامه یکی از گزینه‌های زیر را انتخاب کنید."
+            )
+
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("⚡ فعال‌سازی سرویس مصرف واقعی", callback_data="shop_usage")],
+                [InlineKeyboardButton("📦 خرید بسته حجمی", callback_data="shop_fixed")],
+                [InlineKeyboardButton("💳 کیف پول", callback_data="balance")],
+            ])
+
+        else:
+            msg = (
+                "⏳ تست رایگان شما تمام شد\n\n"
+                "اگر اتصال و سرعت برایتان مناسب بود، کیف پول خود را شارژ کنید و سرویس را فعال کنید.\n\n"
+                f"💰 موجودی فعلی کیف پول شما:\n"
+                f"`{balance:.2f}$`\n\n"
+                f"🎁 اگر تا {bonus_window} دقیقه آینده کیف پول خود را شارژ یا سرویس فعال کنید، "
+                f"`{bonus_amount:.2f}$` اعتبار رایگان دریافت می‌کنید.\n\n"
+                "برای ادامه یکی از گزینه‌های زیر را انتخاب کنید."
+            )
+
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("💳 شارژ کیف پول", callback_data="deposit")],
+                [InlineKeyboardButton("⚡ سرویس مصرف واقعی", callback_data="shop_usage")],
+                [InlineKeyboardButton("📦 بسته حجمی", callback_data="shop_fixed")],
+            ])
+
+        try:
+            await application.bot.send_message(
+                user_id,
+                msg,
+                parse_mode="Markdown",
+                reply_markup=keyboard,
+            )
+        except Exception as e:
+            print("TRIAL EXPIRED MESSAGE ERROR:", e)
+
 async def usage_monitor_loop(application):
     await asyncio.sleep(20)
 
@@ -206,6 +308,11 @@ async def usage_monitor_loop(application):
             await process_usage_billing(application)
         except Exception as e:
             print("USAGE MONITOR LOOP ERROR:", e)
+
+        try:
+            await process_trial_expiration(application)
+        except Exception as e:
+            print("TRIAL MONITOR LOOP ERROR:", e)
 
         interval = int(get_float_setting("usage_check_interval_seconds", 300))
         if interval < 60:

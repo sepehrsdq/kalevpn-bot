@@ -1,6 +1,6 @@
 # KaleVPN Telegram Bot
 
-KaleVPN Bot is a Telegram bot for selling and managing VPN services through a Sanaei / 3x-ui panel.
+KaleVPN Bot is a Telegram bot for selling, testing, and managing VPN services through a Sanaei / 3x-ui panel.
 
 ## Features
 
@@ -21,10 +21,13 @@ KaleVPN Bot is a Telegram bot for selling and managing VPN services through a Sa
 - Admin panel
 - Dynamic pricing
 - Dynamic panel settings
-- Free test management
+- Instant free trial system
 - User ban / unban
 - Broadcast message
 - SQLite database
+- Trial wallet bonus after successful deposit or service activation
+- Dynamic instant trial settings from admin panel
+- Automatic trial expiration / client disable
 
 ---
 
@@ -34,6 +37,7 @@ KaleVPN Bot is a Telegram bot for selling and managing VPN services through a Sa
 kale_vpn_bot/
 │
 ├── main.py
+├── sync_panel_once.py          # optional panel sync script
 ├── requirements.txt
 ├── .env
 ├── .env.example
@@ -54,6 +58,7 @@ kale_vpn_bot/
 │   │   ├── xui.py
 │   │   ├── billing.py
 │   │   ├── referrals.py
+│   │   ├── trials.py
 │   │   └── sync.py
 │   │
 │   └── jobs/
@@ -238,7 +243,8 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/root/kale_vpn_bot
-Environment="PATH=/root/kale_vpn_bot/venv/bin"
+EnvironmentFile=/root/kale_vpn_bot/.env
+Environment="PATH=/root/kale_vpn_bot/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 ExecStart=/root/kale_vpn_bot/venv/bin/python /root/kale_vpn_bot/main.py
 Restart=always
 RestartSec=5
@@ -312,6 +318,90 @@ journalctl -u kalevpn.service -f
 ```
 
 ---
+## Instant Trial System
+
+KaleVPN V3 includes an instant free trial system.
+
+Default behavior:
+
+```text
+Trial duration: 30 minutes
+Trial volume: 0.5GB
+Wallet bonus after eligible deposit or activation: 0.10$
+Bonus window after trial: 30 minutes
+Maximum trials per user: 1
+```
+
+User flow:
+
+```text
+Main Menu → Instant Free Trial
+```
+
+The bot automatically creates a temporary client in the Sanaei / 3x-ui panel and sends the user:
+
+```text
+Subscription link
+Direct VLESS config
+Trial duration
+Trial traffic limit
+```
+
+After the trial expires, the bot disables the trial client and sends the user a follow-up message. If the user charges the wallet or activates a service within the bonus window, the bot can add the configured wallet bonus one time only.
+
+The trial settings are dynamic and can be changed from:
+
+```text
+Admin Panel → Instant Trial Management
+```
+
+Available admin settings:
+
+```text
+Enable / disable instant trial
+Trial duration in minutes
+Trial traffic volume in GB
+Wallet bonus amount
+Bonus window in minutes
+Maximum trial count per user
+```
+
+Important:
+
+```text
+The trial service is separate from the paid service.
+When the user buys a fixed or usage-based service, the bot creates a new paid client.
+The expired trial client remains disabled and is not reused.
+```
+
+---
+
+## Panel Sync Script
+
+If you use the optional panel sync script, it can compare bot invoices with Sanaei / 3x-ui clients and update missing clients as deleted.
+
+Manual run:
+
+```bash
+cd /root/kale_vpn_bot
+source venv/bin/activate
+python sync_panel_once.py
+```
+
+Example cron every 10 minutes:
+
+```cron
+*/10 * * * * cd /root/kale_vpn_bot && /usr/bin/flock -n /tmp/kalevpn-sync.lock /root/kale_vpn_bot/venv/bin/python /root/kale_vpn_bot/sync_panel_once.py >> /root/kale_vpn_bot/logs/sync.log 2>&1
+```
+
+Check sync logs:
+
+```bash
+tail -n 50 /root/kale_vpn_bot/logs/sync.log
+```
+
+---
+
 
 ## Database Backup
 
@@ -523,7 +613,8 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/root/kale_vpn_bot
-Environment="PATH=/root/kale_vpn_bot/venv/bin"
+EnvironmentFile=/root/kale_vpn_bot/.env
+Environment="PATH=/root/kale_vpn_bot/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 ExecStart=/root/kale_vpn_bot/venv/bin/python /root/kale_vpn_bot/main.py
 Restart=always
 RestartSec=5
@@ -540,6 +631,64 @@ systemctl enable kalevpn.service
 systemctl start kalevpn.service
 systemctl status kalevpn.service
 ```
+
+---
+
+## Daily Git Workflow
+
+Before pushing changes from VPS, first fetch remote changes:
+
+```bash
+cd /root/kale_vpn_bot
+git fetch origin
+git status
+```
+
+Stage all code changes:
+
+```bash
+git add .
+```
+
+If you do not want to include README changes:
+
+```bash
+git restore --staged README.md
+```
+
+Commit:
+
+```bash
+git commit -m "Update bot features and fixes"
+```
+
+If GitHub has newer commits, rebase first:
+
+```bash
+git pull --rebase origin main
+```
+
+Push:
+
+```bash
+git push
+```
+
+If conflict happens:
+
+```bash
+git status
+```
+
+Resolve the conflicting files, then:
+
+```bash
+git add .
+git rebase --continue
+git push
+```
+
+Never force push on production unless you are fully sure what changed.
 
 ---
 
@@ -605,7 +754,8 @@ My Services
 Wallet deposit
 Usage monitor
 Referral
-Free test
+Instant trial
+Instant Trial Management from admin panel
 ```
 
 ---
@@ -694,117 +844,7 @@ Set it from bot admin panel:
 ```text
 Admin Panel → Sanaei Panel Settings → Change Subscription URL
 ```
-برای دیدن اطلاعات دیتابیس روی VPS، اول برو داخل پروژه:
 
-```bash
-cd /root/kale_vpn_bot
-```
-
-## 1. باز کردن دیتابیس
-
-```bash
-sqlite3 /root/kale_vpn_bot/data/bot_database.db
-```
-
-بعد وارد محیط SQLite می‌شی. این دستورها را می‌تونی بزنی:
-
-```sql
-.tables
-```
-
-نمایش ساختار جدول‌ها:
-
-```sql
-.schema users
-.schema invoices
-.schema deposits
-```
-
-خروج:
-
-```sql
-.exit
-```
-
+````
 ---
-
-## 2. دیدن جدول کاربران
-
-```bash
-sqlite3 /root/kale_vpn_bot/data/bot_database.db "SELECT user_id, username, balance, referrer_id, is_banned FROM users;"
-```
-
----
-
-## 3. دیدن خریدها / سرویس‌ها
-
-```bash
-sqlite3 /root/kale_vpn_bot/data/bot_database.db "SELECT invoice_id, user_id, service_type, plan, amount, status, delivered, client_email, sub_id, created_at FROM invoices ORDER BY created_at DESC;"
-```
-
----
-
-## 4. دیدن شارژها
-
-```bash
-sqlite3 /root/kale_vpn_bot/data/bot_database.db "SELECT deposit_id, user_id, amount, network, status, tx_hash, created_at FROM deposits ORDER BY created_at DESC;"
-```
-
----
-
-## 5. دیدن تنظیمات بات
-
-```bash
-sqlite3 /root/kale_vpn_bot/data/bot_database.db "SELECT key, value FROM settings;"
-```
-
-برای اینکه پسورد پنل را در خروجی نبینی، این بهتره:
-
-```bash
-sqlite3 /root/kale_vpn_bot/data/bot_database.db "SELECT key, CASE WHEN key='panel_password' THEN '***HIDDEN***' ELSE value END AS value FROM settings;"
-```
-
----
-
-## 6. دیدن لاگ مصرف سرویس مصرفی
-
-```bash
-sqlite3 /root/kale_vpn_bot/data/bot_database.db "SELECT invoice_id, user_id, client_email, delta_bytes, charged_amount, balance_before, balance_after, created_at FROM usage_logs ORDER BY created_at DESC;"
-```
-
----
-
-## 7. خروجی مرتب‌تر با ستون‌بندی
-
-برای حالت خواناتر:
-
-```bash
-sqlite3 -header -column /root/kale_vpn_bot/data/bot_database.db "SELECT user_id, username, balance, is_banned FROM users;"
-```
-
-مثلاً خریدها:
-
-```bash
-sqlite3 -header -column /root/kale_vpn_bot/data/bot_database.db "SELECT invoice_id, user_id, service_type, amount, status, created_at FROM invoices ORDER BY created_at DESC;"
-```
-
----
-
-## 8. بکاپ سریع قبل از دستکاری
-
-قبل از هر تغییر دستی در دیتابیس، این را بزن:
-
-```bash
-cd /root/kale_vpn_bot
-sqlite3 data/bot_database.db ".backup 'backups/bot_database_manual_$(date +%Y-%m-%d_%H-%M-%S).db'"
-```
-
-بعد اگر خواستی یک کاربر خاص را ببینی:
-
-```bash
-sqlite3 -header -column /root/kale_vpn_bot/data/bot_database.db "SELECT * FROM users WHERE user_id=USER_ID;"
-```
-
-به جای `USER_ID` آیدی عددی کاربر را بگذار.
-
 

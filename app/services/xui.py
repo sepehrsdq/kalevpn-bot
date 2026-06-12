@@ -168,6 +168,81 @@ class XUIManager:
         except Exception as e:
             return False, str(e), {}
 
+    def get_all_panel_clients_map(self):
+        ok, msg, inbounds = self.list_inbounds()
+        if not ok:
+            return False, msg, {}
+
+        try:
+            clients_map = {}
+
+            for inbound in inbounds or []:
+                inbound_id = inbound.get("id")
+
+                settings_raw = inbound.get("settings", "{}")
+                if isinstance(settings_raw, str):
+                    settings = json.loads(settings_raw or "{}")
+                else:
+                    settings = settings_raw or {}
+
+                for client in settings.get("clients", []):
+                    email = client.get("email")
+                    sub_id = client.get("subId")
+
+                    item = {
+                        "client": client,
+                        "stats": None,
+                        "inbound_id": inbound_id,
+                        "email": email,
+                        "sub_id": sub_id,
+                        "up": 0,
+                        "down": 0,
+                        "total": 0,
+                        "enable": client.get("enable", True),
+                    }
+
+                    if email:
+                        clients_map[f"email:{email}"] = item
+
+                    if sub_id:
+                        clients_map[f"sub:{sub_id}"] = item
+
+                for stat in inbound.get("clientStats", []):
+                    email = stat.get("email")
+                    if not email:
+                        continue
+
+                    key = f"email:{email}"
+                    up = int(stat.get("up", 0) or 0)
+                    down = int(stat.get("down", 0) or 0)
+
+                    if key in clients_map:
+                        clients_map[key]["stats"] = stat
+                        clients_map[key]["up"] = up
+                        clients_map[key]["down"] = down
+                        clients_map[key]["total"] = up + down
+                        clients_map[key]["enable"] = stat.get(
+                            "enable",
+                            clients_map[key].get("enable", True),
+                        )
+                    else:
+                        clients_map[key] = {
+                            "client": None,
+                            "stats": stat,
+                            "inbound_id": inbound_id,
+                            "email": email,
+                            "sub_id": None,
+                            "up": up,
+                            "down": down,
+                            "total": up + down,
+                            "enable": stat.get("enable", True),
+                        }
+
+            return True, "OK", clients_map
+
+        except Exception as e:
+            return False, str(e), {}
+
     def get_client_traffic(self, client_email):
         ok, msg, clients_map = self.get_panel_clients_map()
         if not ok:
@@ -219,6 +294,82 @@ class XUIManager:
                         "subId": sub_id,
                         "reset": 0,
                         "comment": service_type,
+                    }
+                ]
+            }
+
+            payload = {
+                "id": int(self.inbound_id),
+                "settings": json.dumps(settings),
+            }
+
+            response = self.session.post(
+                f"{self.base_url}/panel/api/inbounds/addClient",
+                data=payload,
+                timeout=20,
+                verify=False,
+            )
+
+            if response.status_code != 200:
+                return False, f"HTTP {response.status_code}: {response.text[:300]}", None
+
+            data = response.json()
+            if not data.get("success"):
+                return False, str(data), None
+
+            sub_base = get_panel_sub_base_url()
+            sub_link = f"{sub_base}/{sub_id}"
+
+            result = {
+                "uuid": client_uuid,
+                "email": email,
+                "sub_id": sub_id,
+                "sub_link": sub_link,
+                "vless_link": None,
+            }
+
+            ok_inbound, _, inbound = self.get_inbound()
+            if ok_inbound and inbound:
+                result["vless_link"] = self.build_vless_link(
+                    inbound,
+                    client_uuid,
+                    email,
+                )
+
+            return True, "OK", result
+
+        except Exception as e:
+            return False, str(e), None
+
+    def add_trial_client(self, email, limit_gb, expiry_minutes):
+        ok, msg = self.login()
+        if not ok:
+            return False, msg, None
+
+        try:
+            client_uuid = str(uuid_gen.uuid4())
+            sub_id = "".join(
+                random.choice(string.ascii_lowercase + string.digits)
+                for _ in range(16)
+            )
+
+            expiry_time = int((time.time() + int(expiry_minutes) * 60) * 1000)
+            total_gb = int(float(limit_gb) * 1024 * 1024 * 1024)
+
+            settings = {
+                "clients": [
+                    {
+                        "id": client_uuid,
+                        "flow": "",
+                        "email": email,
+                        "limitIp": 1,
+                        "totalGB": total_gb,
+                        "expiryTime": expiry_time,
+                        "enable": True,
+                        "tgId": "",
+                        "subId": sub_id,
+                        "reset": 0,
+                        "comment": "instant_trial",
                     }
                 ]
             }

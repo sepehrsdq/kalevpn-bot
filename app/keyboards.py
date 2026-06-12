@@ -19,7 +19,7 @@ def main_menu_keyboard(user_id=None):
         ],
         [
             InlineKeyboardButton(
-                "🆓 اشتراک تست رایگان",
+                "🚀 تست فوری رایگان",
                 callback_data="free_test",
             ),
             InlineKeyboardButton(
@@ -98,7 +98,7 @@ def admin_keyboard():
         ],
         [
             InlineKeyboardButton(
-                "🆓 مدیریت تست",
+                "🚀 مدیریت تست فوری",
                 callback_data="admin_test",
             )
         ],
@@ -232,6 +232,49 @@ def balance_admin_keyboard():
             InlineKeyboardButton(
                 "➖ کاهش موجودی",
                 callback_data="admin_balance_sub",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "🔙 بازگشت",
+                callback_data="admin_panel",
+            )
+        ],
+    ])
+
+
+def trial_admin_keyboard():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                "🟢 فعال/غیرفعال تست فوری",
+                callback_data="trial_toggle",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "⏳ مدت تست",
+                callback_data="trial_set_minutes",
+            ),
+            InlineKeyboardButton(
+                "📦 حجم تست",
+                callback_data="trial_set_gb",
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                "🎁 هدیه کیف پول",
+                callback_data="trial_set_bonus",
+            ),
+            InlineKeyboardButton(
+                "⏰ مهلت هدیه",
+                callback_data="trial_set_bonus_window",
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                "🔁 تعداد مجاز تست",
+                callback_data="trial_set_max",
             )
         ],
         [
